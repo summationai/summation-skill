@@ -12,18 +12,12 @@ From GitHub:
 npx github:summationai/summation-skill install all
 ```
 
-After publishing to npm:
-
-```bash
-npx @summation/summation-skill install all
-```
-
 Targets:
 
 ```bash
-npx @summation/summation-skill install codex
-npx @summation/summation-skill install claude
-npx @summation/summation-skill install all
+npx github:summationai/summation-skill install codex
+npx github:summationai/summation-skill install claude
+npx github:summationai/summation-skill install all
 ```
 
 Default install locations:
@@ -41,20 +35,12 @@ Set the target API:
 export SUM_API_BASE_URL=https://sandbox-api.summation.com
 ```
 
-Use an existing bearer token:
-
-```bash
-export SUM_API_ACCESS_TOKEN=...
-```
-
-Or use M2M credentials:
+M2M credentials:
 
 ```bash
 export SUM_API_CLIENT_ID=...
 export SUM_API_CLIENT_SECRET=...
 ```
-
-Credentials are not written by the installer and must not be committed to the repo.
 
 You can also create a local skill config file:
 
