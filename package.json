@@ -1,0 +1,24 @@
+{
+  "name": "@summation/summation-skill",
+  "version": "0.1.0",
+  "description": "Install the Summation agent skill for Codex and Claude Code.",
+  "license": "UNLICENSED",
+  "private": false,
+  "bin": {
+    "summation-skill": "bin/summation-skill.js"
+  },
+  "files": [
+    "bin/summation-skill.js",
+    "skills/summation/SKILL.md",
+    "skills/summation/agents/openai.yaml",
+    "skills/summation/references/*.md",
+    "skills/summation/scripts/*.py"
+  ],
+  "scripts": {
+    "install:local": "node bin/summation-skill.js install all",
+    "doctor": "node bin/summation-skill.js doctor"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

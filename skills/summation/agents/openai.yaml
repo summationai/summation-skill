@@ -1,0 +1,3 @@
+display_name: Summation
+short_description: Work with Summation through live OpenAPI discovery and public sum-api auth.
+default_prompt: Use Summation through sum-api. Fetch the live OpenAPI contract, authenticate with caller-provided credentials, and call only public API endpoints.
