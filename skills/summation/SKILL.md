@@ -57,7 +57,15 @@ SUM_API_CLIENT_SECRET=...
 SUM_API_M2M_SCOPE="agent:read agent:write"
 ```
 
-Never write credentials into this skill, generated files, examples, commits, logs, or PR descriptions.
+Never write credentials into committed skill source, generated examples, commits, logs, or PR descriptions.
+
+If credentials should persist locally, use:
+
+```bash
+python3 scripts/sum_api.py configure
+```
+
+This writes `.summation-config` in the installed skill directory with file mode `0600`. The helper loads settings in this order: environment variables, explicit `SUM_API_CONFIG_FILE`, current directory `.summation-config`, installed skill `.summation-config`, then home directory `.summation-config`.
 
 Read `references/auth.md` before changing auth behavior or troubleshooting token failures.
 

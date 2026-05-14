@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
 import argparse
+import getpass
 import json
 import os
+import pathlib
 import sys
 import urllib.error
 import urllib.parse
@@ -11,10 +13,85 @@ from typing import Any
 
 
 DEFAULT_BASE_URL = "https://sandbox-api.summation.com"
+CONFIG_FILE_NAME = ".summation-config"
+
+
+def skill_root() -> pathlib.Path:
+    return pathlib.Path(__file__).resolve().parents[1]
+
+
+def candidate_config_paths() -> list[pathlib.Path]:
+    explicit = os.getenv("SUM_API_CONFIG_FILE")
+    paths: list[pathlib.Path] = []
+    if explicit:
+        paths.append(pathlib.Path(explicit).expanduser())
+    paths.extend([
+        pathlib.Path.cwd() / CONFIG_FILE_NAME,
+        skill_root() / CONFIG_FILE_NAME,
+        pathlib.Path.home() / CONFIG_FILE_NAME,
+    ])
+    seen = set()
+    unique_paths = []
+    for path in paths:
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        unique_paths.append(path)
+    return unique_paths
+
+
+def active_config_path() -> pathlib.Path | None:
+    for path in candidate_config_paths():
+        if path.exists():
+            return path
+    return None
+
+
+def parse_config_line(line: str) -> tuple[str, str] | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    if stripped.startswith("export "):
+        stripped = stripped[len("export "):].strip()
+    if "=" not in stripped:
+        return None
+    key, value = stripped.split("=", 1)
+    key = key.strip()
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    return key, value
+
+
+def read_config() -> dict[str, str]:
+    path = active_config_path()
+    if not path:
+        return {}
+    config: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        parsed = parse_config_line(line)
+        if parsed:
+            key, value = parsed
+            config[key] = value
+    return config
+
+
+CONFIG = read_config()
+
+
+def setting(name: str, default: str | None = None) -> str | None:
+    value = os.getenv(name)
+    if value is not None and value != "":
+        return value
+    value = CONFIG.get(name)
+    if value is not None and value != "":
+        return value
+    return default
 
 
 def base_url() -> str:
-    return os.getenv("SUM_API_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+    return setting("SUM_API_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
 
 
 def json_dumps(value: Any) -> str:
@@ -93,11 +170,13 @@ def fetch_openapi() -> dict[str, Any]:
 
 
 def exchange_m2m_token() -> str:
-    client_id = os.getenv("SUM_API_CLIENT_ID")
-    client_secret = os.getenv("SUM_API_CLIENT_SECRET")
-    scope = os.getenv("SUM_API_M2M_SCOPE")
+    client_id = setting("SUM_API_CLIENT_ID")
+    client_secret = setting("SUM_API_CLIENT_SECRET")
+    scope = setting("SUM_API_M2M_SCOPE")
     if not client_id or not client_secret:
-        raise SystemExit("Set SUM_API_ACCESS_TOKEN or SUM_API_CLIENT_ID and SUM_API_CLIENT_SECRET")
+        raise SystemExit(
+            "Set SUM_API_ACCESS_TOKEN, or configure SUM_API_CLIENT_ID and SUM_API_CLIENT_SECRET"
+        )
 
     body: dict[str, Any] = {
         "client_id": client_id,
@@ -114,7 +193,7 @@ def exchange_m2m_token() -> str:
 
 
 def auth_headers(required: bool = True) -> dict[str, str]:
-    token = os.getenv("SUM_API_ACCESS_TOKEN")
+    token = setting("SUM_API_ACCESS_TOKEN")
     if not token:
         token = exchange_m2m_token() if required else None
     if not token:
@@ -223,15 +302,65 @@ def command_token(_: argparse.Namespace) -> None:
     print(json_dumps({"access_token": exchange_m2m_token()}))
 
 
+def config_file_mode(path: pathlib.Path) -> str | None:
+    if not path.exists():
+        return None
+    return oct(path.stat().st_mode & 0o777)
+
+
+def prompt_if_needed(label: str, current: str | None, *, secret: bool = False) -> str | None:
+    if current:
+        return current
+    if not sys.stdin.isatty():
+        return current
+    prompt = f"{label}: "
+    return getpass.getpass(prompt) if secret else input(prompt)
+
+
+def command_configure(args: argparse.Namespace) -> None:
+    path = pathlib.Path(args.path).expanduser() if args.path else skill_root() / CONFIG_FILE_NAME
+    client_id = prompt_if_needed("SUM_API_CLIENT_ID", args.client_id or setting("SUM_API_CLIENT_ID"))
+    client_secret = prompt_if_needed(
+        "SUM_API_CLIENT_SECRET",
+        args.client_secret or setting("SUM_API_CLIENT_SECRET"),
+        secret=True,
+    )
+    values = {
+        "SUM_API_BASE_URL": args.base_url or setting("SUM_API_BASE_URL", DEFAULT_BASE_URL),
+        "SUM_API_CLIENT_ID": client_id or "",
+        "SUM_API_CLIENT_SECRET": client_secret or "",
+    }
+    if args.scope or setting("SUM_API_M2M_SCOPE"):
+        values["SUM_API_M2M_SCOPE"] = args.scope or setting("SUM_API_M2M_SCOPE", "")
+
+    missing = [key for key, value in values.items() if key != "SUM_API_M2M_SCOPE" and not value]
+    if missing:
+        raise SystemExit(f"Missing required config values: {', '.join(missing)}")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["# Summation local API config. Do not commit this file."]
+    lines.extend(f"{key}={value}" for key, value in values.items())
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.chmod(path, 0o600)
+    print(json_dumps({
+        "config_file": str(path),
+        "mode": config_file_mode(path),
+        "stored": sorted(values.keys()),
+    }))
+
+
 def command_doctor(_: argparse.Namespace) -> None:
     spec = fetch_openapi()
+    config_path = active_config_path()
     result = {
         "base_url": base_url(),
+        "config_file": str(config_path) if config_path else None,
+        "config_file_mode": config_file_mode(config_path) if config_path else None,
         "openapi_title": spec.get("info", {}).get("title"),
         "openapi_version": spec.get("info", {}).get("version"),
         "path_count": len(spec.get("paths", {})),
-        "has_access_token": bool(os.getenv("SUM_API_ACCESS_TOKEN")),
-        "has_m2m_credentials": bool(os.getenv("SUM_API_CLIENT_ID") and os.getenv("SUM_API_CLIENT_SECRET")),
+        "has_access_token": bool(setting("SUM_API_ACCESS_TOKEN")),
+        "has_m2m_credentials": bool(setting("SUM_API_CLIENT_ID") and setting("SUM_API_CLIENT_SECRET")),
     }
     print(json_dumps(result))
 
@@ -262,6 +391,14 @@ def main() -> int:
 
     token_parser = subparsers.add_parser("token", help="Exchange M2M credentials for an access token")
     token_parser.set_defaults(func=command_token)
+
+    configure_parser = subparsers.add_parser("configure", help="Write a local Summation config file")
+    configure_parser.add_argument("--base-url", dest="base_url", help="sum-api base URL")
+    configure_parser.add_argument("--client-id", dest="client_id", help="M2M client ID")
+    configure_parser.add_argument("--client-secret", dest="client_secret", help="M2M client secret")
+    configure_parser.add_argument("--scope", help="M2M token scope")
+    configure_parser.add_argument("--path", help="Config file path")
+    configure_parser.set_defaults(func=command_configure)
 
     doctor_parser = subparsers.add_parser("doctor", help="Check OpenAPI reachability and local auth inputs")
     doctor_parser.set_defaults(func=command_doctor)

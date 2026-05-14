@@ -52,7 +52,7 @@ function resolveTargets(kind) {
 
 function copyRecursive(source, target) {
   const baseName = path.basename(source);
-  if (baseName === "__pycache__" || baseName.endsWith(".pyc")) {
+  if (baseName === "__pycache__" || baseName.endsWith(".pyc") || baseName === ".summation-config") {
     return;
   }
 
@@ -84,9 +84,19 @@ function install(kind) {
   }
 
   for (const target of targets) {
+    const configPath = path.join(target.dir, ".summation-config");
+    const existingConfig = fs.existsSync(configPath)
+      ? {
+          content: fs.readFileSync(configPath),
+          mode: fs.statSync(configPath).mode,
+        }
+      : null;
     fs.rmSync(target.dir, { recursive: true, force: true });
     fs.mkdirSync(path.dirname(target.dir), { recursive: true });
     copyRecursive(skillSource, target.dir);
+    if (existingConfig) {
+      fs.writeFileSync(configPath, existingConfig.content, { mode: existingConfig.mode });
+    }
     console.log(`Installed Summation skill for ${target.name}: ${target.dir}`);
   }
 }
