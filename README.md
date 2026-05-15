@@ -27,6 +27,14 @@ Default install locations:
 ~/.claude/skills/summation
 ```
 
+The default Codex and Claude installs are symlinks to:
+
+```text
+~/.agents/skills/summation
+```
+
+Re-running the installer refreshes the shared skill directory and keeps any local `.summation-config` file.
+
 ## Runtime Environment
 
 Set the target API:

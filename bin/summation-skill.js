@@ -6,6 +6,7 @@ const path = require("path");
 
 const repoRoot = path.resolve(__dirname, "..");
 const skillSource = path.join(repoRoot, "skills", "summation");
+const sharedSkillDir = path.join(os.homedir(), ".agents", "skills", "summation");
 
 function usage() {
   console.log(`summation-skill
@@ -32,6 +33,7 @@ function resolveTargets(kind) {
       {
         name: "custom",
         dir: path.resolve(process.env.SUMMATION_SKILL_TARGET_DIR),
+        link: false,
       },
     ];
   }
@@ -39,11 +41,11 @@ function resolveTargets(kind) {
   const codexHome = process.env.CODEX_HOME || homeJoin(".codex");
   const claudeHome = process.env.CLAUDE_HOME || homeJoin(".claude");
   const targets = {
-    codex: [{ name: "codex", dir: path.join(codexHome, "skills", "summation") }],
-    claude: [{ name: "claude", dir: path.join(claudeHome, "skills", "summation") }],
+    codex: [{ name: "codex", dir: path.join(codexHome, "skills", "summation"), link: true }],
+    claude: [{ name: "claude", dir: path.join(claudeHome, "skills", "summation"), link: true }],
     all: [
-      { name: "codex", dir: path.join(codexHome, "skills", "summation") },
-      { name: "claude", dir: path.join(claudeHome, "skills", "summation") },
+      { name: "codex", dir: path.join(codexHome, "skills", "summation"), link: true },
+      { name: "claude", dir: path.join(claudeHome, "skills", "summation"), link: true },
     ],
   };
 
@@ -69,6 +71,44 @@ function copyRecursive(source, target) {
   fs.chmodSync(target, stat.mode);
 }
 
+function readExistingConfig(targets) {
+  for (const target of targets) {
+    const configPath = path.join(target.dir, ".summation-config");
+    if (fs.existsSync(configPath)) {
+      return {
+        content: fs.readFileSync(configPath),
+        mode: fs.statSync(configPath).mode,
+      };
+    }
+  }
+
+  const sharedConfigPath = path.join(sharedSkillDir, ".summation-config");
+  if (fs.existsSync(sharedConfigPath)) {
+    return {
+      content: fs.readFileSync(sharedConfigPath),
+      mode: fs.statSync(sharedConfigPath).mode,
+    };
+  }
+
+  return null;
+}
+
+function installSharedSkill(existingConfig) {
+  fs.rmSync(sharedSkillDir, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(sharedSkillDir), { recursive: true });
+  copyRecursive(skillSource, sharedSkillDir);
+  if (existingConfig) {
+    fs.writeFileSync(path.join(sharedSkillDir, ".summation-config"), existingConfig.content, { mode: existingConfig.mode });
+  }
+}
+
+function createRelativeSymlink(source, target) {
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const relativeSource = path.relative(path.dirname(target), source);
+  fs.symlinkSync(relativeSource, target, "dir");
+}
+
 function install(kind) {
   const targets = resolveTargets(kind);
   if (!targets) {
@@ -83,21 +123,24 @@ function install(kind) {
     return;
   }
 
+  const existingConfig = readExistingConfig(targets);
+  if (targets.some((target) => target.link)) {
+    installSharedSkill(existingConfig);
+  }
+
   for (const target of targets) {
-    const configPath = path.join(target.dir, ".summation-config");
-    const existingConfig = fs.existsSync(configPath)
-      ? {
-          content: fs.readFileSync(configPath),
-          mode: fs.statSync(configPath).mode,
-        }
-      : null;
-    fs.rmSync(target.dir, { recursive: true, force: true });
-    fs.mkdirSync(path.dirname(target.dir), { recursive: true });
-    copyRecursive(skillSource, target.dir);
-    if (existingConfig) {
-      fs.writeFileSync(configPath, existingConfig.content, { mode: existingConfig.mode });
+    if (target.link) {
+      createRelativeSymlink(sharedSkillDir, target.dir);
+      console.log(`Installed Summation skill for ${target.name}: ${target.dir} -> ${fs.readlinkSync(target.dir)}`);
+    } else {
+      fs.rmSync(target.dir, { recursive: true, force: true });
+      fs.mkdirSync(path.dirname(target.dir), { recursive: true });
+      copyRecursive(skillSource, target.dir);
+      if (existingConfig) {
+        fs.writeFileSync(path.join(target.dir, ".summation-config"), existingConfig.content, { mode: existingConfig.mode });
+      }
+      console.log(`Installed Summation skill for ${target.name}: ${target.dir}`);
     }
-    console.log(`Installed Summation skill for ${target.name}: ${target.dir}`);
   }
 }
 
