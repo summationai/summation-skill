@@ -105,7 +105,8 @@ function installSharedSkill(existingConfig) {
 function createRelativeSymlink(source, target) {
   fs.rmSync(target, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  const relativeSource = path.relative(path.dirname(target), source);
+  const realTargetParent = fs.realpathSync(path.dirname(target));
+  const relativeSource = path.relative(realTargetParent, source);
   fs.symlinkSync(relativeSource, target, "dir");
 }
 
