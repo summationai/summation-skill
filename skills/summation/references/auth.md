@@ -57,6 +57,8 @@ When `SUM_API_ACCESS_TOKEN` is absent and M2M credentials are present, exchange 
 POST /v1/auth/m2m/token
 ```
 
+The token exchange is sent as `application/x-www-form-urlencoded`, not JSON. Normal sum-api calls still use JSON bodies.
+
 The returned access token is used as:
 
 ```text
@@ -78,3 +80,4 @@ The client ID and secret are caller-owned inputs. The skill can read them from t
 - `403` usually means the token is valid but the principal lacks permission.
 - `404` can mean the resource does not exist or is not visible to the principal.
 - `429` means retry with jitter and respect any retry headers.
+- On macOS, `certificate verify failed` usually means Python cannot find a CA bundle. Set `SSL_CERT_FILE` to a CA bundle path or install `certifi` in the Python environment running the skill helper.

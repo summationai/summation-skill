@@ -42,6 +42,14 @@ export SUM_API_CLIENT_ID=...
 export SUM_API_CLIENT_SECRET=...
 ```
 
+On macOS, if Python cannot verify TLS certificates, either install `certifi` in the Python environment running the helper or set:
+
+```bash
+export SSL_CERT_FILE="$(python3 -m certifi)"
+```
+
+Credentials are not written by the installer and must not be committed to the repo.
+
 You can also create a local skill config file:
 
 ```bash

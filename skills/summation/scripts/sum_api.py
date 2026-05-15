@@ -5,6 +5,7 @@ import getpass
 import json
 import os
 import pathlib
+import ssl
 import sys
 import urllib.error
 import urllib.parse
@@ -107,6 +108,27 @@ def parse_json_arg(raw: str | None, default: Any) -> Any:
         raise SystemExit(f"Invalid JSON argument: {exc}") from exc
 
 
+def ssl_context() -> ssl.SSLContext | None:
+    cert_file = setting("SSL_CERT_FILE") or os.getenv("REQUESTS_CA_BUNDLE")
+    if cert_file:
+        return ssl.create_default_context(cafile=cert_file)
+    try:
+        import certifi
+    except ImportError:
+        return None
+    return ssl.create_default_context(cafile=certifi.where())
+
+
+def format_url_error(exc: urllib.error.URLError) -> str:
+    reason = exc.reason
+    if isinstance(reason, ssl.SSLCertVerificationError):
+        return (
+            "Request failed: TLS certificate verification failed. "
+            "Set SSL_CERT_FILE to a CA bundle path, or install certifi in this Python environment."
+        )
+    return f"Request failed: {exc}"
+
+
 def request_json(
     method: str,
     path_or_url: str,
@@ -114,6 +136,7 @@ def request_json(
     headers: dict[str, str] | None = None,
     body: Any = None,
     query: dict[str, Any] | None = None,
+    form: bool = False,
 ) -> Any:
     if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
         url = path_or_url
@@ -135,12 +158,16 @@ def request_json(
     if headers:
         request_headers.update(headers)
     if body is not None:
-        data = json.dumps(body).encode("utf-8")
-        request_headers["Content-Type"] = "application/json"
+        if form:
+            data = urllib.parse.urlencode(body).encode("utf-8")
+            request_headers["Content-Type"] = "application/x-www-form-urlencoded"
+        else:
+            data = json.dumps(body).encode("utf-8")
+            request_headers["Content-Type"] = "application/json"
 
     req = urllib.request.Request(url, data=data, headers=request_headers, method=method.upper())
     try:
-        with urllib.request.urlopen(req, timeout=60) as response:
+        with urllib.request.urlopen(req, timeout=60, context=ssl_context()) as response:
             raw = response.read()
             if not raw:
                 return None
@@ -162,7 +189,7 @@ def request_json(
             }
         })) from exc
     except urllib.error.URLError as exc:
-        raise SystemExit(f"Request failed: {exc}") from exc
+        raise SystemExit(format_url_error(exc)) from exc
 
 
 def fetch_openapi() -> dict[str, Any]:
@@ -185,7 +212,7 @@ def exchange_m2m_token() -> str:
     if scope:
         body["scope"] = scope
 
-    response = request_json("POST", "/v1/auth/m2m/token", body=body)
+    response = request_json("POST", "/v1/auth/m2m/token", body=body, form=True)
     token = response.get("access_token") if isinstance(response, dict) else None
     if not token:
         raise SystemExit("M2M token response did not include access_token")
