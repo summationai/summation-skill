@@ -25,20 +25,38 @@ https://sandbox-api.summation.com
 
 ## Helper
 
-Prefer the bundled helper for deterministic discovery and calls:
+Prefer the bundled helper for deterministic discovery and calls. The skill lives at `~/.claude/skills/summation` (Claude Code) or `~/.codex/skills/summation` (Codex) — both symlink to `~/.agents/skills/summation`.
 
 ```bash
-cd ~/.codex/skills/summation
-python3 scripts/sum_api.py openapi
-python3 scripts/sum_api.py operations projects
-python3 scripts/sum_api.py call GET /v1/projects
-python3 scripts/sum_api.py operation list_agent_projects_v1_projects_get
+SKILL=~/.claude/skills/summation     # or ~/.codex/skills/summation
+python3 $SKILL/scripts/sum_api.py openapi
+python3 $SKILL/scripts/sum_api.py operations projects
+python3 $SKILL/scripts/sum_api.py describe create_project_v1_projects_post
+python3 $SKILL/scripts/sum_api.py schema FileWriteRequest
+python3 $SKILL/scripts/sum_api.py call GET /v1/projects
+python3 $SKILL/scripts/sum_api.py operation list_agent_projects_v1_projects_get
 ```
 
-For Claude Code, the same skill usually lives at:
+### Subcommands
+
+- `openapi` — full OpenAPI document.
+- `operations [search]` — list operations; filter by method, path, tag, operationId, or summary.
+- `describe <operationId>` — print one operation's resolved schema (parameters, request body, responses) **without calling it**. Use this before mutating endpoints.
+- `schema <Name>` — print a component schema with `$ref`s resolved. Substring match if no exact hit (errors if ambiguous).
+- `call <METHOD> <path>` — call any path directly. Flags: `--query`, `--body`, `--stream`.
+- `operation <operationId>` — call a discovered operation. Flags: `--params`, `--body`, `--stream`.
+- `token` — print a fresh M2M access token (for piping into `curl`).
+- `configure` — write a local `.summation-config` (mode `0600`).
+- `doctor` — sanity check (base URL, config file, OpenAPI reachability, auth inputs).
+
+### Streaming (SSE)
+
+For streaming endpoints (chat create/reply, report generation, report verification, file imports), pass `--stream`. The helper sets `Accept: text/event-stream` and writes one response line at a time to stdout. In Claude Code, pair with `Monitor` so each SSE line becomes an event:
 
 ```bash
-cd ~/.claude/skills/summation
+python3 $SKILL/scripts/sum_api.py call --stream \
+  POST /v1/projects/<project_id>/conversations \
+  --body '{"message":"..."}'
 ```
 
 ## Auth
@@ -76,9 +94,11 @@ Do not hardcode the API catalog in the skill. The OpenAPI contract is the source
 Use:
 
 ```bash
-python3 scripts/sum_api.py operations reports
-python3 scripts/sum_api.py operations query
-python3 scripts/sum_api.py operation create_chat_and_stream_v1_projects__project_id__conversations_post --params '{"project_id":"..."}' --body '{"message":"..."}'
+python3 $SKILL/scripts/sum_api.py operations reports
+python3 $SKILL/scripts/sum_api.py operations query
+python3 $SKILL/scripts/sum_api.py describe create_chat_and_stream_v1_projects__project_id__conversations_post
+python3 $SKILL/scripts/sum_api.py operation create_chat_and_stream_v1_projects__project_id__conversations_post \
+  --params '{"project_id":"..."}' --body '{"message":"..."}' --stream
 ```
 
 Read `references/openapi.md` when route selection, pagination, streaming, idempotency, or error behavior matters.
