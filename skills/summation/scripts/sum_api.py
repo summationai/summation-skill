@@ -228,6 +228,79 @@ def auth_headers(required: bool = True) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def resolve_refs(node: Any, spec: dict[str, Any], _seen: frozenset[str] | None = None) -> Any:
+    seen = _seen or frozenset()
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str):
+            if ref in seen:
+                return {"$ref": ref, "__cycle__": True}
+            target: Any = spec
+            for part in ref.lstrip("#/").split("/"):
+                if not isinstance(target, dict) or part not in target:
+                    return node
+                target = target[part]
+            return resolve_refs(target, spec, seen | {ref})
+        return {key: resolve_refs(value, spec, seen) for key, value in node.items()}
+    if isinstance(node, list):
+        return [resolve_refs(item, spec, seen) for item in node]
+    return node
+
+
+def request_stream(
+    method: str,
+    path_or_url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    body: Any = None,
+    query: dict[str, Any] | None = None,
+) -> None:
+    if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
+        url = path_or_url
+    else:
+        path = path_or_url if path_or_url.startswith("/") else f"/{path_or_url}"
+        url = f"{base_url()}{path}"
+
+    if query:
+        clean_query = {key: str(value) for key, value in query.items() if value is not None}
+        if clean_query:
+            separator = "&" if "?" in url else "?"
+            url = f"{url}{separator}{urllib.parse.urlencode(clean_query)}"
+
+    request_headers = {"Accept": "text/event-stream"}
+    if headers:
+        for key, value in headers.items():
+            if key.lower() != "accept":
+                request_headers[key] = value
+
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        request_headers["Content-Type"] = "application/json"
+
+    req = urllib.request.Request(url, data=data, headers=request_headers, method=method.upper())
+    try:
+        with urllib.request.urlopen(req, timeout=600, context=ssl_context()) as response:
+            for raw_line in response:
+                sys.stdout.write(raw_line.decode("utf-8", errors="replace"))
+                sys.stdout.flush()
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        try:
+            detail = json.loads(raw)
+        except json.JSONDecodeError:
+            detail = raw
+        raise SystemExit(json_dumps({
+            "error": {
+                "status": exc.code,
+                "reason": exc.reason,
+                "body": detail,
+            }
+        })) from exc
+    except urllib.error.URLError as exc:
+        raise SystemExit(format_url_error(exc)) from exc
+
+
 def iter_operations(spec: dict[str, Any]):
     for path, path_item in spec.get("paths", {}).items():
         if not isinstance(path_item, dict):
@@ -302,12 +375,17 @@ def command_operation(args: argparse.Namespace) -> None:
     method, path, operation = find_operation(spec, args.operation_id)
     params = parse_json_arg(args.params, {})
     body = parse_json_arg(args.body, None)
+    filled_path = fill_path(path, params)
+    query = operation_query_params(operation, params)
+    if args.stream:
+        request_stream(method, filled_path, headers=auth_headers(), body=body, query=query)
+        return
     response = request_json(
         method,
-        fill_path(path, params),
+        filled_path,
         headers=auth_headers(),
         body=body,
-        query=operation_query_params(operation, params),
+        query=query,
     )
     print(json_dumps(response))
 
@@ -315,6 +393,15 @@ def command_operation(args: argparse.Namespace) -> None:
 def command_call(args: argparse.Namespace) -> None:
     query = parse_json_arg(args.query, {})
     body = parse_json_arg(args.body, None)
+    if args.stream:
+        request_stream(
+            args.method,
+            args.path,
+            headers=auth_headers(),
+            body=body,
+            query=query,
+        )
+        return
     response = request_json(
         args.method,
         args.path,
@@ -323,6 +410,40 @@ def command_call(args: argparse.Namespace) -> None:
         query=query,
     )
     print(json_dumps(response))
+
+
+def command_describe(args: argparse.Namespace) -> None:
+    spec = fetch_openapi()
+    method, path, operation = find_operation(spec, args.operation_id)
+    request_body = operation.get("requestBody")
+    out = {
+        "method": method,
+        "path": path,
+        "operationId": operation.get("operationId"),
+        "summary": operation.get("summary"),
+        "description": operation.get("description"),
+        "tags": operation.get("tags", []),
+        "parameters": resolve_refs(operation.get("parameters", []), spec),
+        "requestBody": resolve_refs(request_body, spec) if request_body else None,
+        "responses": resolve_refs(operation.get("responses", {}), spec),
+    }
+    print(json_dumps(out))
+
+
+def command_schema(args: argparse.Namespace) -> None:
+    spec = fetch_openapi()
+    schemas = spec.get("components", {}).get("schemas", {})
+    name = args.name
+    if name not in schemas:
+        matches = [n for n in schemas if name.lower() in n.lower()]
+        if not matches:
+            raise SystemExit(f"Schema not found: {name}")
+        if len(matches) > 1:
+            raise SystemExit(
+                f"Ambiguous schema name '{name}'. Candidates: {', '.join(sorted(matches)[:10])}"
+            )
+        name = matches[0]
+    print(json_dumps({"name": name, "schema": resolve_refs(schemas[name], spec)}))
 
 
 def command_token(_: argparse.Namespace) -> None:
@@ -407,6 +528,11 @@ def main() -> int:
     operation_parser.add_argument("operation_id")
     operation_parser.add_argument("--params", help="JSON object for path and query parameters")
     operation_parser.add_argument("--body", help="JSON request body")
+    operation_parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Stream response body line-by-line (for SSE or NDJSON endpoints; pair with Monitor in Claude Code)",
+    )
     operation_parser.set_defaults(func=command_operation)
 
     call_parser = subparsers.add_parser("call", help="Call a method and path directly")
@@ -414,7 +540,26 @@ def main() -> int:
     call_parser.add_argument("path")
     call_parser.add_argument("--query", help="JSON object of query parameters")
     call_parser.add_argument("--body", help="JSON request body")
+    call_parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Stream response body line-by-line (for SSE or NDJSON endpoints; pair with Monitor in Claude Code)",
+    )
     call_parser.set_defaults(func=command_call)
+
+    describe_parser = subparsers.add_parser(
+        "describe",
+        help="Print an operation's resolved schema without calling it",
+    )
+    describe_parser.add_argument("operation_id")
+    describe_parser.set_defaults(func=command_describe)
+
+    schema_parser = subparsers.add_parser(
+        "schema",
+        help="Print a component schema with $ref's resolved (substring match if name is not exact)",
+    )
+    schema_parser.add_argument("name")
+    schema_parser.set_defaults(func=command_schema)
 
     token_parser = subparsers.add_parser("token", help="Exchange M2M credentials for an access token")
     token_parser.set_defaults(func=command_token)
