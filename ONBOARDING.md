@@ -1,5 +1,7 @@
 # Summation Skill — Onboarding
 
+| Note: Paste this guide into Claude Code or Codex. Agent will walk you through your team's setup for Summation and get you started.
+
 Plug Summation into your existing **Claude Code** or **Codex** harness. The skill talks to the public `sum-api`, discovers the live OpenAPI contract at runtime, and ships with M2M auth out of the box.
 
 ## What you need
