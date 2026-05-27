@@ -25,7 +25,7 @@ https://sandbox-api.summation.com
 
 ## Helper
 
-Prefer the bundled helper for deterministic discovery and calls. The skill lives at `~/.claude/skills/summation` (Claude Code) or `~/.codex/skills/summation` (Codex) — both symlink to `~/.agents/skills/summation`.
+Prefer the bundled helper for deterministic discovery and calls. The skill lives at `~/.claude/skills/summation` (Claude Code) or `~/.codex/skills/summation` (Codex).
 
 ```bash
 SKILL=~/.claude/skills/summation     # or ~/.codex/skills/summation
@@ -61,19 +61,7 @@ python3 $SKILL/scripts/sum_api.py call --stream \
 
 ## Auth
 
-Use one of these runtime credential forms:
-
-```bash
-SUM_API_ACCESS_TOKEN=...
-```
-
-or:
-
-```bash
-SUM_API_CLIENT_ID=...
-SUM_API_CLIENT_SECRET=...
-SUM_API_M2M_SCOPE="agent:read agent:write"
-```
+Ask the user to drop the `.summation-config` that you can copy over to the $SKILL folder or ask user to point to a file that contains `SUM_API_BASE_URL`, `SUM_API_CLIENT_ID` and `SUM_API_CLIENT_SECRET`
 
 Never write credentials into committed skill source, generated examples, commits, logs, or PR descriptions.
 
